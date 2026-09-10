@@ -671,6 +671,30 @@ function deleteRegistre_(p){
   return true;
 }
 
+/* ============== PESOS CC ============== */
+function readPesos_(){
+  var sh=getSS_().getSheetByName('Pesos');
+  if(!sh) return {p1r:null, p2n:null};
+  var v=sh.getDataRange().getValues(); var found=[];
+  for(var i=0;i<v.length-1;i++){
+    if(String(v[i][0]||'').trim().toLowerCase()==='c1'){
+      var wRow=v[i+1], pesos={};
+      CAPS.forEach(function(cap,idx){ var val=Number(wRow[idx]); if(isNaN(val)) val=0; pesos[cap]=val>1?val/100:val; });
+      found.push(pesos);
+    }
+  }
+  return {p1r:found[0]||null, p2n:found[1]||null};
+}
+function weightedNota_(cells, pesos){
+  var num=0, den=0;
+  CAPS.forEach(function(cap){
+    var v=cells[cap]; if(v==null||isNaN(v)) return;
+    var w=pesos?(pesos[cap]||0):1/CAPS.length;
+    num+=v*w; den+=w;
+  });
+  return den>0?Math.round(num/den*10)/10:null;
+}
+
 /* ============== RESUM (lectura per al web) ============== */
 function getModuleResum_(p){
   var ss=openModule_(p.moduleCodi); var letter=letterOf_(p.classe);
@@ -704,28 +728,51 @@ function getAlumneGlobalResum_(p){
   readMain_('usuaris').rows.forEach(function(u){ if(String(u[c.id])===String(p.userId)) student=u; });
   if(!student) throw new Error('Alumne no trobat.');
   var nom=String(student[c.nom]).trim(), cognom=String(student[c.cognom]).trim(), classe=String(student[c.classe]).trim();
-  var curs=classe.charAt(0);
-  var cm=CONFIG.cols.moduls; var moduls=[];
+  var lletra=classe.slice(1); // 'A' de '1A' o '2A'
+  var classe1r='1'+lletra, classe2n='2'+lletra;
+  // Llegeix TOTS els mòduls (1r i 2n)
+  var cm=CONFIG.cols.moduls; var allModuls=[];
   readMain_('moduls').rows.forEach(function(m){
-    if(normVal_(m[cm.curs])===curs && normVal_(m[cm.sheetId]))
-      moduls.push({codi:normVal_(m[cm.codi]), nom:String(m[cm.nom])});
+    var curs=normVal_(m[cm.curs]);
+    if((curs==='1'||curs==='2')&&normVal_(m[cm.sheetId]))
+      allModuls.push({codi:normVal_(m[cm.codi]), nom:String(m[cm.nom]), curs:curs});
   });
-  var modulData=[]; var globalAcc={};
-  CAPS.forEach(function(cap){ globalAcc[cap]={s:0,c:0}; });
-  moduls.forEach(function(modul){
+  var pesos=readPesos_();
+  var acc1r={}, acc2n={};
+  CAPS.forEach(function(cap){ acc1r[cap]={s:0,c:0}; acc2n[cap]={s:0,c:0}; });
+  var modulData=[];
+  allModuls.forEach(function(modul){
+    var cl=(modul.curs==='1')?classe1r:classe2n;
     try{
-      var resum=getModuleResum_({moduleCodi:modul.codi, classe:classe});
+      var resum=getModuleResum_({moduleCodi:modul.codi, classe:cl});
       var found=null;
-      resum.students.forEach(function(s){ if(s.nom.trim()===nom && s.cognom.trim()===cognom) found=s; });
+      resum.students.forEach(function(s){ if(s.nom.trim()===nom&&s.cognom.trim()===cognom) found=s; });
       if(!found) return;
+      var acc=(modul.curs==='1')?acc1r:acc2n;
       var hasData=false;
-      CAPS.forEach(function(cap){ var v=found.cells[cap]; if(v!=null){globalAcc[cap].s+=v;globalAcc[cap].c++;hasData=true;} });
-      if(hasData) modulData.push({codi:modul.codi, nom:modul.nom, cells:found.cells});
+      CAPS.forEach(function(cap){ var v=found.cells[cap]; if(v!=null){acc[cap].s+=v;acc[cap].c++;hasData=true;} });
+      if(hasData) modulData.push({codi:modul.codi, nom:modul.nom, cells:found.cells, curs:modul.curs});
     }catch(e){}
   });
-  var globalCells={};
-  CAPS.forEach(function(cap){ globalCells[cap]=globalAcc[cap].c>0?Math.round(globalAcc[cap].s/globalAcc[cap].c):null; });
-  return {nom:nom, cognom:cognom, classe:classe, modules:modulData, global:{cells:globalCells}, capNoms:RESUM_NOMS};
+  var cells1r={}, cells2n={}, cellsCicle={};
+  CAPS.forEach(function(cap){
+    cells1r[cap]=acc1r[cap].c>0?Math.round(acc1r[cap].s/acc1r[cap].c):null;
+    cells2n[cap]=acc2n[cap].c>0?Math.round(acc2n[cap].s/acc2n[cap].c):null;
+    var vals=[cells1r[cap],cells2n[cap]].filter(function(v){return v!=null;});
+    cellsCicle[cap]=vals.length?Math.round(vals.reduce(function(a,b){return a+b;},0)/vals.length):null;
+  });
+  var nota1r=weightedNota_(cells1r, pesos.p1r);
+  var nota2n=weightedNota_(cells2n, pesos.p2n);
+  var notaCicle=(nota1r!=null&&nota2n!=null)?Math.round((nota1r+nota2n)*5)/10:(nota1r!=null?nota1r:nota2n);
+  return {
+    nom:nom, cognom:cognom, classe:classe,
+    modules:modulData,
+    global1r:{cells:cells1r, nota:nota1r},
+    global2n:{cells:cells2n, nota:nota2n},
+    globalCicle:{cells:cellsCicle, nota:notaCicle},
+    pesos:{p1r:pesos.p1r, p2n:pesos.p2n},
+    capNoms:RESUM_NOMS
+  };
 }
 
 /* ============== RESUM GLOBAL DE CLASSE (PDF export) ============== */
@@ -737,29 +784,45 @@ function getClassGlobalResum_(p){
     .map(function(u){return {id:String(u[c.id]),nom:String(u[c.nom]),cognom:String(u[c.cognom])};})
     .sort(function(a,b){return (a.cognom+a.nom).localeCompare(b.cognom+b.nom);});
   if(!students.length) return {classe:classe,students:[],capNoms:RESUM_NOMS};
-  var curs=classe.charAt(0); var cm=CONFIG.cols.moduls; var moduls=[];
+  var lletra=classe.slice(1); var classe1r='1'+lletra; var classe2n='2'+lletra;
+  var cm=CONFIG.cols.moduls; var allModuls=[];
   readMain_('moduls').rows.forEach(function(m){
-    if(normVal_(m[cm.curs])===curs&&normVal_(m[cm.sheetId]))
-      moduls.push({codi:normVal_(m[cm.codi]),nom:String(m[cm.nom])});
+    var curs=normVal_(m[cm.curs]);
+    if((curs==='1'||curs==='2')&&normVal_(m[cm.sheetId]))
+      allModuls.push({codi:normVal_(m[cm.codi]),nom:String(m[cm.nom]),curs:curs});
   });
   var nameToId={};
   students.forEach(function(s){nameToId[(s.nom+'|'+s.cognom).toLowerCase()]=s.id;});
-  var acc={};
-  students.forEach(function(s){acc[s.id]={};CAPS.forEach(function(cap){acc[s.id][cap]={s:0,c:0};});});
-  moduls.forEach(function(modul){
+  var acc1r={}, acc2n={};
+  students.forEach(function(s){
+    acc1r[s.id]={}; acc2n[s.id]={};
+    CAPS.forEach(function(cap){acc1r[s.id][cap]={s:0,c:0}; acc2n[s.id][cap]={s:0,c:0};});
+  });
+  var pesos=readPesos_();
+  allModuls.forEach(function(modul){
+    var cl=(modul.curs==='1')?classe1r:classe2n;
     try{
-      var resum=getModuleResum_({moduleCodi:modul.codi,classe:classe});
+      var resum=getModuleResum_({moduleCodi:modul.codi,classe:cl});
       resum.students.forEach(function(st){
         var sid=nameToId[(st.nom.trim()+'|'+st.cognom.trim()).toLowerCase()];
-        if(!sid)return;
+        if(!sid||!acc1r[sid]) return;
+        var acc=(modul.curs==='1')?acc1r:acc2n;
         CAPS.forEach(function(cap){var v=st.cells[cap];if(v!=null){acc[sid][cap].s+=v;acc[sid][cap].c++;}});
       });
     }catch(e){}
   });
   var result=students.map(function(s){
-    var cells={};
-    CAPS.forEach(function(cap){cells[cap]=acc[s.id][cap].c>0?Math.round(acc[s.id][cap].s/acc[s.id][cap].c):null;});
-    return {nom:s.nom,cognom:s.cognom,cells:cells};
+    var cells1r={}, cells2n={}, cellsCicle={};
+    CAPS.forEach(function(cap){
+      cells1r[cap]=acc1r[s.id][cap].c>0?Math.round(acc1r[s.id][cap].s/acc1r[s.id][cap].c):null;
+      cells2n[cap]=acc2n[s.id][cap].c>0?Math.round(acc2n[s.id][cap].s/acc2n[s.id][cap].c):null;
+      var vals=[cells1r[cap],cells2n[cap]].filter(function(v){return v!=null;});
+      cellsCicle[cap]=vals.length?Math.round(vals.reduce(function(a,b){return a+b;},0)/vals.length):null;
+    });
+    var nota1r=weightedNota_(cells1r,pesos.p1r);
+    var nota2n=weightedNota_(cells2n,pesos.p2n);
+    var notaCicle=(nota1r!=null&&nota2n!=null)?Math.round((nota1r+nota2n)*5)/10:(nota1r!=null?nota1r:nota2n);
+    return {nom:s.nom,cognom:s.cognom,cells:cellsCicle,nota:notaCicle};
   });
   return {classe:classe,students:result,capNoms:RESUM_NOMS};
 }
@@ -848,7 +911,7 @@ function getAdminUsers_(){
     var moduls=parseModuls_(u[c.moduls]).map(function(code){ return modIdx[code]||{codi:code,nom:code}; });
     var obj={id:String(u[c.id]),nom:String(u[c.nom]),cognom:String(u[c.cognom]),
       username:String(u[c.username]),rol:String(u[c.rol]),classe:String(u[c.classe]||''),
-      moduls:moduls, resetRequest:!!(u[c.resetRequest])};
+      moduls:moduls, resetRequest:String(u[c.resetRequest]||'')};
     var r=String(u[c.rol]);
     if(r==='admin') admins.push(obj);
     else if(r==='professor') professors.push(obj);
@@ -864,13 +927,35 @@ function resetPassword_(p){
   if(pwCol<0) throw new Error('No s\'ha trobat la columna password.');
   var sh=getSS_().getSheetByName(CONFIG.sheets.usuaris.name);
   var rrCol=colIndex_(data.headers,c.resetRequest);
+  var mailResult=null;
   data.rows.forEach(function(u){
     if(String(u[c.id])!==String(p.userId)) return;
     sh.getRange(u.__row,pwCol).setValue(String(p.password||''));
     if(rrCol>=0) sh.getRange(u.__row,rrCol).setValue('');
+    // Envia correu a l'usuari notificant el restabliment
+    var userEmail=String(u[c.correu]||'').trim();
+    var userName=String(u[c.nom]||'').trim()+' '+String(u[c.cognom]||'').trim();
+    if(userEmail){
+      var htmlBody='<div style="font-family:sans-serif;font-size:14px;color:#222;line-height:1.6">'
+        +'<p>Estimat/da '+String(u[c.nom]||'').trim()+',</p>'
+        +'<p>Vas fer la petició de restablir la contrasenya del web EAS_CC.</p>'
+        +'<p>La teva contrasenya torna a ser la inicial: <strong>1234</strong>. No obstant això, et demanarà que en tornis a posar una de nova.</p>'
+        +'<p>Recorda que la contrasenya no hauria de ser una que utilitzis en altres plataformes. No la comparteixes amb ningú.</p>'
+        +'<p>Salutacions,</p>'
+        +'</div>';
+      var mailError=null;
+      try{
+        MailApp.sendEmail({to:userEmail, subject:'Restablir contrasenya EAS_CC', htmlBody:htmlBody});
+      }catch(e){
+        mailError=String(e && e.message ? e.message : e);
+        Logger.log('Error enviant correu restabliment a '+userEmail+': '+mailError);
+      }
+      mailResult={mailSent:!mailError, mailError:mailError, mailTo:userEmail};
+    }
   });
-  return true;
+  return mailResult||{mailSent:false, mailError:'Usuari no trobat o sense correu', mailTo:null};
 }
+
 function changePassword_(p){
   var c=CONFIG.cols.usuaris;
   var data=readMain_('usuaris'); var pwCol=colIndex_(data.headers,c.password);
@@ -885,17 +970,115 @@ function changePassword_(p){
   return true;
 }
 function requestPasswordReset_(p){
+  // Escriu el timestamp a la columna M. El trigger checkPendingResets_
+  // s'encarrega d'enviar el correu als admins quan detecta canvis.
   var c=CONFIG.cols.usuaris;
   var data=readMain_('usuaris'); var col=colIndex_(data.headers,c.resetRequest);
   if(col<0) throw new Error('No s\'ha trobat la columna reset request al full Usuaris.');
   var sh=getSS_().getSheetByName(CONFIG.sheets.usuaris.name); var found=false;
+  var now=new Date();
+  var dd=now.getDate(),mm=now.getMonth()+1,yy=now.getFullYear(),hh=now.getHours(),mi=now.getMinutes();
+  var nowStr=(dd<10?'0':'')+dd+'/'+(mm<10?'0':'')+mm+'/'+yy+' '+(hh<10?'0':'')+hh+':'+(mi<10?'0':'')+mi;
   data.rows.forEach(function(u){
     if(String(u[c.username]).trim()===String(p.username||'').trim()){
-      sh.getRange(u.__row,col).setValue(true); found=true;
+      sh.getRange(u.__row,col).setValue(nowStr); found=true;
     }
   });
   if(!found) throw new Error('No s\'ha trobat cap usuari amb aquest nom d\'usuari.');
   return true;
+}
+
+/* ============== TRIGGER: NOTIFICACIÓ SOL·LICITUDS PENDENTS ============== */
+
+/**
+ * Comprova si hi ha sol·licituds de restabliment pendents.
+ * Envia un correu als admins NOMÉS si el conjunt de pendents
+ * ha canviat des de l'últim enviament (evita correus repetitius).
+ *
+ * S'ha d'activar des del trigger temporal (installResetTrigger_).
+ */
+function checkPendingResets_(){
+  var c=CONFIG.cols.usuaris;
+  var data=readMain_('usuaris');
+  var pending=data.rows.filter(function(u){
+    return String(u[c.resetRequest]||'').trim()!=='';
+  });
+
+  var props=PropertiesService.getScriptProperties();
+
+  if(pending.length===0){
+    // No hi ha pendents: neteja l'estat guardat
+    props.deleteProperty('lastResetSnapshot');
+    return;
+  }
+
+  // Crea una "empremta" del conjunt actual: id+timestamp de cada pendent
+  var snapshot=pending.map(function(u){
+    return String(u[c.id])+'|'+String(u[c.resetRequest]);
+  }).sort().join(';');
+
+  var lastSnapshot=props.getProperty('lastResetSnapshot')||'';
+  if(snapshot===lastSnapshot) return; // Res de nou, no s'envia correu
+
+  // Hi ha canvis: construeix i envia el correu
+  var tableRows=pending.map(function(u){
+    return '<tr>'
+      +'<td style="padding:6px 12px;border:1px solid #ddd">'+String(u[c.nom]||'')+'</td>'
+      +'<td style="padding:6px 12px;border:1px solid #ddd">'+String(u[c.cognom]||'')+'</td>'
+      +'<td style="padding:6px 12px;border:1px solid #ddd">'+String(u[c.correu]||'')+'</td>'
+      +'<td style="padding:6px 12px;border:1px solid #ddd">'+String(u[c.resetRequest]||'')+'</td>'
+      +'</tr>';
+  }).join('');
+
+  var htmlBody='<div style="font-family:sans-serif;font-size:14px;color:#222;line-height:1.6">'
+    +'<p>Estimats Nau i Iván,</p>'
+    +'<p>Hi ha sol·licituds pendents de restabliment de contrasenya a l\'EAS_CC. Us passo el llistat actualitzat perquè pugueu gestionar-ho amb el perfil d\'admin.</p>'
+    +'<table style="border-collapse:collapse;margin:12px 0">'
+    +'<thead><tr style="background:#f0f4f8;font-weight:600">'
+    +'<th style="padding:6px 12px;border:1px solid #ddd;text-align:left">Nom</th>'
+    +'<th style="padding:6px 12px;border:1px solid #ddd;text-align:left">Cognoms</th>'
+    +'<th style="padding:6px 12px;border:1px solid #ddd;text-align:left">Mail</th>'
+    +'<th style="padding:6px 12px;border:1px solid #ddd;text-align:left">Data de sol·licitud</th>'
+    +'</tr></thead>'
+    +'<tbody>'+tableRows+'</tbody></table>'
+    +'<p>Gràcies per la feina que feu, sou els millors.</p>'
+    +'<p>Salutacions,</p></div>';
+
+  MailApp.sendEmail({
+    to:'nmarieges@ieb.cat,ibustos@ieb.cat',
+    subject:'Sol·licituds pendents de restablir contrasenya EAS_CC',
+    htmlBody:htmlBody
+  });
+
+  // Guarda l'empremta per evitar repetir el correu si no canvia res
+  props.setProperty('lastResetSnapshot', snapshot);
+  Logger.log('Correu de pendents enviat. Sol·licituds: '+pending.length);
+}
+
+/**
+ * Executa aquesta funció UNA SOLA VEGADA des de l'editor de GAS
+ * per instal·lar el trigger horari. GAS demanarà autorització de Gmail.
+ *
+ * Per desinstal·lar: executa removeResetTrigger_()
+ */
+function installResetTrigger(){
+  // Elimina triggers existents d'aquesta funció per evitar duplicats
+  ScriptApp.getProjectTriggers().forEach(function(t){
+    if(t.getHandlerFunction()==='checkPendingResets_') ScriptApp.deleteTrigger(t);
+  });
+  // Trigger cada hora
+  ScriptApp.newTrigger('checkPendingResets_')
+    .timeBased()
+    .everyHours(1)
+    .create();
+  Logger.log('Trigger instal·lat: checkPendingResets_ cada hora.');
+}
+
+function removeResetTrigger(){
+  ScriptApp.getProjectTriggers().forEach(function(t){
+    if(t.getHandlerFunction()==='checkPendingResets_') ScriptApp.deleteTrigger(t);
+  });
+  Logger.log('Trigger eliminat.');
 }
 
 /* ============== GESTIÓ DE DESDOBLAMENTS (ADMIN) ============== */
