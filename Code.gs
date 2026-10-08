@@ -279,9 +279,12 @@ function readModuleActivities_(ss, codi){
 }
 function getActivityIndicators_(p){
   var act=String(p.activitat||'').trim(); var codes=null; var indParaules={};
-  if(p.moduleCodi){ try{ var ss=openModule_(p.moduleCodi); var res=readModuleActivities_(ss, p.moduleCodi); var mod=res.map;
+  var ab=readActivityBlocks_();
+  if(ab.blocks[act]){
+    codes=ab.blocks[act]; indParaules=ab.indParaules[act]||{};
+  } else if(p.moduleCodi){ try{ var ss=openModule_(p.moduleCodi); var res=readModuleActivities_(ss, p.moduleCodi); var mod=res.map;
     if(mod[act]){ codes=mod[act]; indParaules=res.indParaules[act]||{}; } }catch(e){} }
-  if(!codes){ var ab=readActivityBlocks_(); codes=(ab.blocks[act])||[]; if(!Object.keys(indParaules).length) indParaules=ab.indParaules[act]||{}; }
+  if(!codes) codes=[];
   var cat=indicatorCatalog_();
   return { indicators:codes.map(function(codi){ var ind=cat[codi]||{codi:codi,capacitat:'?',requisit:'',text:'(no trobat)',colorInd:'#cccccc',colorCap:'#999999',capacitatId:capOf_(codi)};
     ind.paraules=indParaules[codi]||''; return ind; }) };
