@@ -126,6 +126,11 @@ function handleRequest(action, payload) {
       case 'deleteActivity':        return { ok:true, deleted: deleteActivity_(payload) };
       // admin: usuaris
       case 'getAdminUsers':         return { ok:true, data: getAdminUsers_() };
+      case 'deleteUser':            return { ok:true, done: deleteUser_(payload) };
+      case 'editUser':              return { ok:true, done: editUser_(payload) };
+      case 'getClassesConfig':      return { ok:true, config: readClassesConfig_() };
+      case 'saveClassesConfig':     return { ok:true, done: saveClassesConfig_(payload) };
+      case 'getAlumneHistorial':    return { ok:true, data: getAlumneHistorial_(payload) };
       case 'resetPassword':         return { ok:true, done: resetPassword_(payload) };
       case 'changePassword':        return { ok:true, done: changePassword_(payload) };
       case 'requestPasswordReset':  return { ok:true, done: requestPasswordReset_(payload) };
@@ -952,6 +957,7 @@ function getAdminUsers_(){
     var moduls=parseModuls_(u[c.moduls]).map(function(code){ return modIdx[code]||{codi:code,nom:code}; });
     var obj={id:String(u[c.id]),nom:String(u[c.nom]),cognom:String(u[c.cognom]),
       username:String(u[c.username]),rol:String(u[c.rol]),classe:String(u[c.classe]||''),
+      correu:String(u[c.correu]||''), modulsCodes:String(u[c.moduls]||''),
       moduls:moduls, resetRequest:String(u[c.resetRequest]||'')};
     var r=String(u[c.rol]);
     if(r==='admin') admins.push(obj);
@@ -961,6 +967,108 @@ function getAdminUsers_(){
   var bySort=function(a,b){return (a.cognom+a.nom).localeCompare(b.cognom+b.nom);};
   admins.sort(bySort); professors.sort(bySort); alumnes.sort(bySort);
   return { admins:admins, professors:professors, alumnes:alumnes };
+}
+function deleteUser_(p){
+  var c=CONFIG.cols.usuaris;
+  bustMain_('usuaris');
+  var data=readMain_('usuaris');
+  var sh=getSS_().getSheetByName(CONFIG.sheets.usuaris.name);
+  var hdrs=data.headers;
+  var nom, cognom, found=false;
+  data.rows.forEach(function(u){
+    if(String(u[c.id])!==String(p.userId)) return;
+    found=true;
+    nom=String(u[c.nom]).trim();
+    cognom=String(u[c.cognom]).trim();
+    var idCol=colIndex_(hdrs,c.id);
+    var blank=[];
+    for(var ci=0;ci<hdrs.length;ci++) blank.push(ci+1===idCol?String(u[c.id]):'');
+    sh.getRange(u.__row,1,1,hdrs.length).setValues([blank]);
+  });
+  if(!found) throw new Error('Usuari no trobat.');
+  deleteFromModuleTabs_(nom,cognom);
+  return true;
+}
+function deleteFromModuleTabs_(nom,cognom){
+  var T=CONFIG.modTab, R=CONFIG.resTab;
+  var ss=getSS_();
+  var skip=[CONFIG.sheets.usuaris.name,CONFIG.sheets.moduls.name,CONFIG.sheets.actInd.name,CONFIG.sheets.indicadors.name];
+  var key=(nom+'|'+cognom).toLowerCase();
+  ss.getSheets().forEach(function(sheet){
+    var name=sheet.getName();
+    if(skip.indexOf(name)>-1) return;
+    if(/\bOrg$/.test(name)||/\bAct$/.test(name)) return;
+    var isResum=/Resum/.test(name);
+    var startRow=isResum?R.rosterRow:T.rosterRow;
+    var last=sheet.getLastRow();
+    if(last<startRow) return;
+    var vals=sheet.getRange(startRow,T.nomCol,last-startRow+1,2).getValues();
+    var toDelete=[];
+    for(var i=0;i<vals.length;i++){
+      var n=String(vals[i][0]||'').trim(), cg=String(vals[i][1]||'').trim();
+      if((n+'|'+cg).toLowerCase()===key) toDelete.push(startRow+i);
+    }
+    toDelete.sort(function(a,b){return b-a;});
+    toDelete.forEach(function(row){sheet.deleteRow(row);});
+  });
+}
+function editUser_(p){
+  var c=CONFIG.cols.usuaris;
+  bustMain_('usuaris');
+  var data=readMain_('usuaris');
+  var sh=getSS_().getSheetByName(CONFIG.sheets.usuaris.name);
+  var hdrs=data.headers;
+  var oldNom, oldCognom, found=false;
+  data.rows.forEach(function(u){
+    if(String(u[c.id])!==String(p.userId)) return;
+    found=true;
+    oldNom=String(u[c.nom]).trim();
+    oldCognom=String(u[c.cognom]).trim();
+    var fields=[
+      {col:c.nom,      val:p.nom},
+      {col:c.cognom,   val:p.cognom},
+      {col:c.correu,   val:p.correu},
+      {col:c.username, val:p.username},
+      {col:c.classe,   val:p.classe},
+      {col:c.moduls,   val:p.modulsCodes},
+      {col:c.rol,      val:p.rol}
+    ];
+    fields.forEach(function(f){
+      if(f.val===undefined||f.val===null) return;
+      var ci=colIndex_(hdrs,f.col);
+      if(ci>0) sh.getRange(u.__row,ci).setValue(String(f.val));
+    });
+  });
+  if(!found) throw new Error('Usuari no trobat.');
+  var newNom=(p.nom!==undefined&&p.nom!==null)?String(p.nom).trim():oldNom;
+  var newCognom=(p.cognom!==undefined&&p.cognom!==null)?String(p.cognom).trim():oldCognom;
+  if(newNom!==oldNom||newCognom!==oldCognom){
+    updateNameInModuleTabs_(oldNom,oldCognom,newNom,newCognom);
+  }
+  return true;
+}
+function updateNameInModuleTabs_(oldNom,oldCognom,newNom,newCognom){
+  var T=CONFIG.modTab, R=CONFIG.resTab;
+  var ss=getSS_();
+  var skip=[CONFIG.sheets.usuaris.name,CONFIG.sheets.moduls.name,CONFIG.sheets.actInd.name,CONFIG.sheets.indicadors.name];
+  var oldKey=(oldNom+'|'+oldCognom).toLowerCase();
+  ss.getSheets().forEach(function(sheet){
+    var name=sheet.getName();
+    if(skip.indexOf(name)>-1) return;
+    if(/\bOrg$/.test(name)||/\bAct$/.test(name)) return;
+    var isResum=/Resum/.test(name);
+    var startRow=isResum?R.rosterRow:T.rosterRow;
+    var last=sheet.getLastRow();
+    if(last<startRow) return;
+    var vals=sheet.getRange(startRow,T.nomCol,last-startRow+1,2).getValues();
+    for(var i=0;i<vals.length;i++){
+      var nom=String(vals[i][0]||'').trim(), cog=String(vals[i][1]||'').trim();
+      if((nom+'|'+cog).toLowerCase()===oldKey){
+        sheet.getRange(startRow+i,T.nomCol).setValue(newNom);
+        sheet.getRange(startRow+i,T.cogCol).setValue(newCognom);
+      }
+    }
+  });
 }
 function resetPassword_(p){
   var c=CONFIG.cols.usuaris;
@@ -1208,6 +1316,105 @@ function _deleteCatalogRows_(sh, nom, actCol){
   for(var i=v.length-1;i>=1;i--){ if(String(v[i][ci-1]||'').trim()===nom) sh.deleteRow(i+1); }
 }
 
+/* ============== GESTIÓ CLASSES (HISTORIAL ALUMNAT) ============== */
+function readClassesConfig_(){
+  var FIXED=['1A','1B','1C','2A','2B','2C'];
+  var ss=getSS_();
+  var sh=ss.getSheetByName('Classes');
+  if(!sh){
+    sh=ss.insertSheet('Classes');
+    sh.getRange(1,1,1,2).setValues([['classe','historial']]).setFontWeight('bold');
+    FIXED.forEach(function(c,i){ sh.getRange(2+i,1,1,2).setValues([[c,'no']]); });
+  }
+  var v=sh.getDataRange().getValues();
+  var hdrs=v[0].map(function(h){return String(h).trim();});
+  var cc=hdrs.indexOf('classe'), hc=hdrs.indexOf('historial');
+  var map={};
+  FIXED.forEach(function(c){ map[c]=false; });
+  for(var i=1;i<v.length;i++){
+    var cl=String(v[i][cc>=0?cc:0]||'').trim();
+    if(cl) map[cl]=(String(v[i][hc>=0?hc:1]||'').trim().toLowerCase()==='si');
+  }
+  return map;
+}
+function saveClassesConfig_(p){
+  var FIXED=['1A','1B','1C','2A','2B','2C'];
+  var ss=getSS_();
+  var sh=ss.getSheetByName('Classes');
+  if(!sh){
+    sh=ss.insertSheet('Classes');
+    sh.getRange(1,1,1,2).setValues([['classe','historial']]).setFontWeight('bold');
+  }
+  var v=sh.getDataRange().getValues();
+  var hdrs=v[0].map(function(h){return String(h).trim();});
+  var cc=hdrs.indexOf('classe')+1, hc=hdrs.indexOf('historial')+1;
+  if(cc<=0){ sh.getRange(1,1).setValue('classe'); cc=1; }
+  if(hc<=0){ sh.getRange(1,2).setValue('historial'); hc=2; }
+  var rowMap={};
+  for(var i=1;i<v.length;i++){
+    var cl=String(v[i][cc-1]||'').trim(); if(cl) rowMap[cl]=i+1;
+  }
+  var cfg=p.config||{};
+  FIXED.forEach(function(c){
+    var val=(cfg[c]===true)?'si':'no';
+    if(rowMap[c]){ sh.getRange(rowMap[c],hc).setValue(val); }
+    else{ var lr=sh.getLastRow(); sh.getRange(lr+1,cc).setValue(c); sh.getRange(lr+1,hc).setValue(val); rowMap[c]=lr+1; }
+  });
+  return true;
+}
+
+/* ============== HISTORIAL DE L'ALUMNE ============== */
+function getAlumneHistorial_(p){
+  var c=CONFIG.cols.usuaris; var student=null;
+  readMainCached_('usuaris').rows.forEach(function(u){ if(String(u[c.id])===String(p.userId)) student=u; });
+  if(!student) throw new Error('Alumne no trobat.');
+  var nom=String(student[c.nom]).trim(), cognom=String(student[c.cognom]).trim(), classe=String(student[c.classe]).trim();
+  var lletra=classe.charAt(classe.length-1).toUpperCase();
+  var cm=CONFIG.cols.moduls; var modIdx={};
+  readMainCached_('moduls').rows.forEach(function(m){ var codi=normVal_(m[cm.codi]); if(codi) modIdx[codi]={codi:codi,nom:String(m[cm.nom])}; });
+  var ss=getSS_(); var registres=[];
+  var key=(nom+'|'+cognom).toLowerCase();
+  Object.keys(modIdx).forEach(function(codi){
+    var sh=ss.getSheetByName(modTabName_(codi, lletra)); if(!sh) return;
+    var T=CONFIG.modTab; var last=sh.getLastRow(); if(last<T.rosterRow) return;
+    var roster=sh.getRange(T.rosterRow,T.nomCol,last-T.rosterRow+1,2).getValues();
+    var studentRow=-1;
+    for(var ri=0;ri<roster.length;ri++){
+      if((String(roster[ri][0]||'').trim()+'|'+String(roster[ri][1]||'').trim()).toLowerCase()===key){ studentRow=T.rosterRow+ri; break; }
+    }
+    if(studentRow<0) return;
+    readBlocks_(sh, true).forEach(function(b){
+      var arr=b.notes?b.notes[studentRow]:null;
+      if(!arr||!arr.some(function(v){return v!==''&&v!=null;})) return;
+      // get sorted indicator codes to map position → codi
+      var indInfos=[];
+      try{
+        var sortedInds=sortInds_(getActivityIndicators_({activitat:b.activitat,moduleCodi:codi}).indicators);
+        indInfos=sortedInds.map(function(ind){ return {codi:ind.codi,text:ind.text,cap:ind.capacitatId||capOf_(ind.codi)}; });
+      }catch(e){
+        indInfos=b.inds.map(function(ind){ return {codi:ind.text||'?',text:ind.text||'',cap:ind.capId||''}; });
+      }
+      var ccAcc={};
+      indInfos.forEach(function(ind,i){
+        if(i>=arr.length) return;
+        var v=arr[i]; if(v===''||v==null||String(v).toUpperCase()==='NA') return;
+        var n=Number(v); if(isNaN(n)) return;
+        if(!ccAcc[ind.cap]) ccAcc[ind.cap]={s:0,c:0};
+        ccAcc[ind.cap].s+=n; ccAcc[ind.cap].c++;
+      });
+      var ccMeans={}; CAPS.forEach(function(cap){ var d=ccAcc[cap]; ccMeans[cap]=d?Math.round(d.s/d.c):null; });
+      var inds=indInfos.map(function(ind,i){
+        var v=i<arr.length?arr[i]:null; var grade=null;
+        if(v!==''&&v!=null){ if(String(v).toUpperCase()==='NA') grade='NA'; else{ var n=Number(v); if(!isNaN(n)) grade=n; } }
+        return {codi:ind.codi,text:ind.text,cap:ind.cap,grade:grade};
+      }).filter(function(x){return x.grade!==null;});
+      registres.push({moduleCodi:codi,moduleNom:modIdx[codi].nom,activitat:b.activitat,data:b.data,projNum:b.projNum,ccMeans:ccMeans,inds:inds});
+    });
+  });
+  registres.sort(function(a,b){return String(b.data).localeCompare(String(a.data));});
+  return {registres:registres};
+}
+
 /*************************************************************************
  * createModuleSheets() — crea el Google Sheet de cada mòdul sense ID,
  * amb les pestanyes i el roster, i escriu l'ID a la pestanya Mòduls.
@@ -1250,6 +1457,9 @@ function getInitialData_(p) {
 }
 function loginAndInit_(p) {
   var user=loginUser_(p);
+  if(user.rol==='alumne'){
+    try{ var cc=readClassesConfig_(); user.historialEnabled=!!(cc[user.classe]); }catch(e){ user.historialEnabled=false; }
+  }
   return { user:user, initialData:getInitialData_({user:user}) };
 }
 
