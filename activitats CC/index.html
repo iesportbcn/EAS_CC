@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ca">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Activitats CC</title>
+    <style>
+      :root {
+        --bg1: #0f172a;
+        --bg2: #1d4ed8;
+        --card: rgba(15, 23, 42, 0.75);
+        --text: #e2e8f0;
+        --accent: #fbbf24;
+        --accent2: #34d399;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Arial, Helvetica, sans-serif;
+        background: linear-gradient(135deg, var(--bg1), var(--bg2));
+        color: var(--text);
+        display: grid;
+        place-items: center;
+      }
+
+      .card {
+        width: min(90vw, 760px);
+        background: var(--card);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 24px;
+        padding: 40px 28px;
+        box-shadow: 0 20px 45px rgba(0,0,0,0.35);
+        text-align: center;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(251, 191, 36, 0.2);
+        color: var(--accent);
+        font-weight: bold;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+      }
+
+      h1 {
+        margin: 20px 0 12px;
+        font-size: clamp(2.5rem, 6vw, 4.2rem);
+        line-height: 1.1;
+      }
+
+      .highlight {
+        color: var(--accent);
+      }
+
+      p {
+        font-size: 1.05rem;
+        color: #cbd5e1;
+        max-width: 540px;
+        margin: 0 auto 26px;
+      }
+
+      .buttons {
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        display: inline-block;
+        padding: 12px 20px;
+        border-radius: 12px;
+        text-decoration: none;
+        font-weight: bold;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+      }
+
+      .btn.primary {
+        background: var(--accent);
+        color: #111827;
+        box-shadow: 0 10px 25px rgba(251, 191, 36, 0.4);
+      }
+
+      .btn.secondary {
+        background: rgba(52, 211, 153, 0.15);
+        color: var(--accent2);
+        border: 1px solid rgba(52, 211, 153, 0.4);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="badge">Activitats CC</div>
+      <h1>La zona <span class="highlight">mola</span> de les CC</h1>
+      <p>
+        Benvingut a la teva pàgina d'activitats! Aquí el creatiu, el color i l'entusiasme
+        es barregen per fer-ho tot més divertit i inspirador.
+      </p>
+      <div class="buttons">
+        <a class="btn primary" href="#">Començar</a>
+        <a class="btn secondary" href="exemples/index.html">Exemples</a>
+      </div>
+    </main>
+  </body>
+</html>
