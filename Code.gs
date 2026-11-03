@@ -130,6 +130,8 @@ function handleRequest(action, payload) {
       case 'editUser':              return { ok:true, done: editUser_(payload) };
       case 'getClassesConfig':      return { ok:true, config: readClassesConfig_() };
       case 'saveClassesConfig':     return { ok:true, done: saveClassesConfig_(payload) };
+      case 'getExemplesConfig':     var _ec=readExemplesConfig_(); return { ok:true, config: _ec.config, urls: _ec.urls };
+      case 'saveExemplesConfig':    return { ok:true, done: saveExemplesConfig_(payload) };
       case 'getAlumneHistorial':    return { ok:true, data: getAlumneHistorial_(payload) };
       case 'resetPassword':         return { ok:true, done: resetPassword_(payload) };
       case 'changePassword':        return { ok:true, done: changePassword_(payload) };
@@ -1363,6 +1365,56 @@ function saveClassesConfig_(p){
   return true;
 }
 
+/* ============== EXEMPLES PRÀCTICS CONFIG ============== */
+function readExemplesConfig_(){
+  var FIXED=['lleure','mp1139','mp1136','mp0179','mp1709','mg-esports','ianimacio'];
+  var ss=getSS_();
+  var sh=ss.getSheetByName('Exemples');
+  if(!sh){
+    sh=ss.insertSheet('Exemples');
+    sh.getRange(1,1,1,2).setValues([['id','actiu']]).setFontWeight('bold');
+    FIXED.forEach(function(id,i){ sh.getRange(2+i,1,1,2).setValues([[id,'si']]); });
+  }
+  var v=sh.getDataRange().getValues();
+  var hdrs=v[0].map(function(h){return String(h).trim();});
+  var ic=hdrs.indexOf('id'), ac=hdrs.indexOf('actiu'), uc=hdrs.indexOf('url');
+  var map={}, urls={};
+  FIXED.forEach(function(id){ map[id]=true; });
+  for(var i=1;i<v.length;i++){
+    var mid=String(v[i][ic>=0?ic:0]||'').trim();
+    if(mid){
+      map[mid]=(String(v[i][ac>=0?ac:1]||'').trim().toLowerCase()!=='no');
+      if(uc>=0){ var u=String(v[i][uc]||'').trim(); if(u) urls[mid]=u; }
+    }
+  }
+  return {config:map, urls:urls};
+}
+function saveExemplesConfig_(p){
+  var FIXED=['lleure','mp1139','mp1136','mp0179','mp1709','mg-esports','ianimacio'];
+  var ss=getSS_();
+  var sh=ss.getSheetByName('Exemples');
+  if(!sh){
+    sh=ss.insertSheet('Exemples');
+    sh.getRange(1,1,1,2).setValues([['id','actiu']]).setFontWeight('bold');
+  }
+  var v=sh.getDataRange().getValues();
+  var hdrs=v[0].map(function(h){return String(h).trim();});
+  var ic=hdrs.indexOf('id')+1, ac=hdrs.indexOf('actiu')+1;
+  if(ic<=0){ sh.getRange(1,1).setValue('id'); ic=1; }
+  if(ac<=0){ sh.getRange(1,2).setValue('actiu'); ac=2; }
+  var rowMap={};
+  for(var i=1;i<v.length;i++){
+    var mid=String(v[i][ic-1]||'').trim(); if(mid) rowMap[mid]=i+1;
+  }
+  var cfg=p.config||{};
+  FIXED.forEach(function(id){
+    var val=(cfg[id]===false)?'no':'si';
+    if(rowMap[id]){ sh.getRange(rowMap[id],ac).setValue(val); }
+    else{ var lr=sh.getLastRow(); sh.getRange(lr+1,ic).setValue(id); sh.getRange(lr+1,ac).setValue(val); rowMap[id]=lr+1; }
+  });
+  return true;
+}
+
 /* ============== HISTORIAL DE L'ALUMNE ============== */
 function getAlumneHistorial_(p){
   var c=CONFIG.cols.usuaris; var student=null;
@@ -1390,9 +1442,9 @@ function getAlumneHistorial_(p){
       var indInfos=[];
       try{
         var sortedInds=sortInds_(getActivityIndicators_({activitat:b.activitat,moduleCodi:codi}).indicators);
-        indInfos=sortedInds.map(function(ind){ return {codi:ind.codi,text:ind.text,cap:ind.capacitatId||capOf_(ind.codi)}; });
+        indInfos=sortedInds.map(function(ind){ return {codi:ind.codi,text:ind.text,cap:ind.capacitatId||capOf_(ind.codi),paraules:ind.paraules||''}; });
       }catch(e){
-        indInfos=b.inds.map(function(ind){ return {codi:ind.text||'?',text:ind.text||'',cap:ind.capId||''}; });
+        indInfos=b.inds.map(function(ind){ return {codi:ind.text||'?',text:ind.text||'',cap:ind.capId||'',paraules:''}; });
       }
       var ccAcc={};
       indInfos.forEach(function(ind,i){
@@ -1406,9 +1458,16 @@ function getAlumneHistorial_(p){
       var inds=indInfos.map(function(ind,i){
         var v=i<arr.length?arr[i]:null; var grade=null;
         if(v!==''&&v!=null){ if(String(v).toUpperCase()==='NA') grade='NA'; else{ var n=Number(v); if(!isNaN(n)) grade=n; } }
-        return {codi:ind.codi,text:ind.text,cap:ind.cap,grade:grade};
+        return {codi:ind.codi,text:ind.text,cap:ind.cap,grade:grade,paraules:ind.paraules||''};
       }).filter(function(x){return x.grade!==null;});
-      registres.push({moduleCodi:codi,moduleNom:modIdx[codi].nom,activitat:b.activitat,data:b.data,projNum:b.projNum,ccMeans:ccMeans,inds:inds});
+      var seen={}, hashtags=[];
+      indInfos.forEach(function(ind){
+        String(ind.paraules||'').trim().split(/[\s,]+/).forEach(function(w){
+          var t=w.replace(/^#+/,'').trim(); if(!t) return;
+          var key=t.toLowerCase(); if(!seen[key]){ seen[key]=true; hashtags.push('#'+t); }
+        });
+      });
+      registres.push({moduleCodi:codi,moduleNom:modIdx[codi].nom,activitat:b.activitat,data:b.data,projNum:b.projNum,ccMeans:ccMeans,inds:inds,hashtags:hashtags.slice(0,3)});
     });
   });
   registres.sort(function(a,b){return String(b.data).localeCompare(String(a.data));});
